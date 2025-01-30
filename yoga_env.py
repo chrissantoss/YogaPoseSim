@@ -18,15 +18,16 @@ class YogaEnv(gym.Env):
         p.setTimeStep(self.timeStep)
 
         # Define action and observation space
-        # Example: action space for joint control
-        self.action_space = spaces.Box(low=-1, high=1, shape=(17,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(44,), dtype=np.float32)
+        self.action_space = spaces.Discrete(2)  # Example action space
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32)  # Adjusted shape
 
     def step(self, action):
         # Apply action to the robot
-        # Example: set joint motor control
-        for i in range(len(action)):
-            p.setJointMotorControl2(self.humanoidId, i, p.POSITION_CONTROL, targetPosition=action[i])
+        # Assuming action is a single integer, use it directly
+        # Here, you might want to map the action to a specific joint control
+        # For example, if action is 0, move joint to position 0, if 1, move to position 1
+        target_position = 0.0 if action == 0 else 1.0
+        p.setJointMotorControl2(self.humanoidId, 0, p.POSITION_CONTROL, targetPosition=target_position)
 
         p.stepSimulation()
         time.sleep(self.timeStep)
@@ -50,23 +51,47 @@ class YogaEnv(gym.Env):
         initial_position = [random.uniform(-0.1, 0.1), random.uniform(-0.1, 0.1), 1]
         self.humanoidId = p.loadURDF("humanoid/humanoid.urdf", initial_position, useFixedBase=False)
         p.setGravity(0, 0, -9.81)
-        return self._get_observation()
+        return np.zeros(self.observation_space.shape, dtype=np.float32)
 
     def _get_observation(self):
         # Example: get joint states
         joint_states = p.getJointStates(self.humanoidId, range(p.getNumJoints(self.humanoidId)))
         joint_positions = [state[0] for state in joint_states]
-        return np.array(joint_positions, dtype=np.float32)
+        # Ensure the observation matches the defined shape
+        return np.array(joint_positions[:15], dtype=np.float32)  # Adjusted to match the shape
 
     def _calculate_reward(self, observation):
-        # Reward for staying upright
+        # Define target joint positions for the "Downward Dog" pose
+        # These values are hypothetical and should be adjusted based on your robot's joint configuration
+        target_pose = np.array([
+            0.0,  # Head/neck angle
+            -1.0, # Shoulder angle (arms straight, pointing down)
+            0.5,  # Elbow angle (slightly bent)
+            -1.5, # Hip angle (legs straight, pointing up)
+            0.0,  # Knee angle (straight)
+            0.5,  # Ankle angle (slightly bent)
+            0.0,  # Additional joints as needed
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ])
+
+        # Calculate the difference between current and target joint positions
+        pose_error = np.linalg.norm(observation - target_pose)
+
+        # Reward for minimizing pose error
+        pose_reward = -pose_error
+
+        # Additional reward for staying upright
         base_position, _ = p.getBasePositionAndOrientation(self.humanoidId)
-        upright_reward = base_position[2]  # Higher reward for staying upright
+        upright_reward = base_position[2]
 
-        # Penalize large joint angles
-        joint_penalty = -np.linalg.norm(observation)
-
-        return upright_reward + joint_penalty
+        return pose_reward + upright_reward
 
     def _check_done(self, observation):
         # Example: check if robot has fallen
